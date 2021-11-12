@@ -15,7 +15,7 @@ if __name__ == "__main__":
     z = inputs[0] * weights[0] + inputs[1] * weights[1] + inputs[2] * weights[2] + bias
 
     # applying activation
-    a = max(z, 0)
+    initial_a = max(z, 0)
 
     # Backward pass
 
@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     # derivative of relu
     dReLU_dz = d_value * (1.0 if z > 0 else 0.0)
-    print(dReLU_dz)
+    # print(dReLU_dz)
 
     # partial derivative of multiplication
     dSum_dxw0 = 1  # derivative of sum is always 1
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     dReLU_dxw2 = dReLU_dz * dSum_dxw2
     dReLU_dBias = dReLU_dz * dSum_dBias
 
-    print(dReLU_dxw0, dReLU_dxw1, dReLU_dxw2, dReLU_dBias)
+    # print(dReLU_dxw0, dReLU_dxw1, dReLU_dxw2, dReLU_dBias)
 
     dMul_dx0 = weights[0]
     dMul_dx1 = weights[1]
@@ -67,4 +67,19 @@ if __name__ == "__main__":
 
     # this will be used to tweak the weights and biases
     dw = [dRelu_dw0, dRelu_dw1, dRelu_dw2]
-    db = [dReLU_dBias]
+    db = dReLU_dBias
+
+    # the optimizer tweaks them as follows
+    weights[0] += -0.001 * dw[0]
+    weights[1] += -0.001 * dw[1]
+    weights[2] += -0.001 * dw[2]
+    bias += -0.001 * db
+
+    print(f"new weights {weights} and bias : {bias}")
+
+    # now calculating the new output
+    z = inputs[0] * weights[0] + inputs[1] * weights[1] + inputs[2] * weights[2] + bias
+    a = max(z, 0)
+    print(f"The initial value of {initial_a} bas been changed to {a}")
+
+    # as we can see, we have reduced the output of single perceptron using back-propagation
