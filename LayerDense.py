@@ -29,20 +29,45 @@ class LayerDense:
         # biases are in the shape of 1 x number of neurons
         self.biases = np.zeros((1, n_neurons))
 
+    # forward pass
     def forward(self, inputs):
+        self.inputs = inputs  # we need to remember inputs for calculating gradients
         self.output = np.dot(inputs, self.weights) + self.biases
+
+    # backward pass
+    def backward(self, dvalues):
+        self.dweights = np.dot(self.inputs.T, dvalues)
+        self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
+        self.dinputs = np.dot(dvalues, self.weights.T)
 
 
 class ReLU:
+    # forward pass
     def forward(self, inputs):
+        self.inputs = inputs  # used for gradient calculation
         self.output = np.maximum(0, inputs)
+
+    # backward pass
+    def backward(self, dvalues):
+        self.dinputs = self.inputs.copy()
+        self.dinputs[self.inputs <= 0] = 0
 
 
 class Softmax:
     def forward(self, inputs):
+        self.inputs = inputs
         exp_values = np.exp(inputs - np.max(inputs, axis=1, keepdims=True))
         probabilities = exp_values / np.sum(exp_values, axis=1, keepdims=True)
         self.output = probabilities
+
+    # backward pass
+    def backward(self, dvalues):
+        self.dinputs = np.empty_like(dvalues)  # This will become the resulting gradient array
+
+        for index, (single_output, single_dvalues) in enumerate(zip(self.output, dvalues)):
+            single_output = single_output.reshape(-1, 1)
+            jacobian_matrix = np.diagflat(single_output) - np.dot(single_output, single_output.T)
+            self.dinputs[index] = np.dot(jacobian_matrix, single_dvalues)
 
 
 class Loss:
@@ -69,37 +94,75 @@ class CategoricalCrossEntropyLoss(Loss):
         negative_log_likelihoods = -np.log(correct_confidences)
         return negative_log_likelihoods
 
+    # backward pass for categorical cross-entropy is just (- y_true) / y_pred
+    def backward(self, dvalues, y_true):
+        samples = len(dvalues)
+        # there are multiple labels in each sample. hence we are using first one to count
+        labels = len(dvalues[0])
 
-# layer1 = LayerDense(4, 5)
-# # here output of layer 1 will be (x,5), so we need to have layer 2 of the shape (5,y)
-# layer2 = LayerDense(5, 2)
-# layer1.forward(X)
-# # print(layer1.output)
-# layer2.forward(layer1.output)
-# # print(layer2.output)
-X, y = spiral_data(100, 3)
-# layer1 = LayerDense(2, 5)
-# activation1 = ReLU()
-# layer1.forward(X)
-# # print(layer1.output)
-#
-# activation1.forward(layer1.output)
-# print(activation1.output)
+        # for sparse labels, we need to convert them into one-hot vectors
+        if len(y_true.shape) == 1:
+            y_true = np.eye(labels)[y_true]
+            # note that if the index of row is i then the ith place has one in eye matrix
 
-dense1 = LayerDense(2, 3)
-activation1 = ReLU()
+        # calculating the gradient
+        self.dinputs = -y_true / dvalues
+        self.dinputs = self.dinputs / samples
+        # normalization is required so that the gradients don't explode
 
-dense2 = LayerDense(3, 3)
-activation2 = Softmax()
 
-dense1.forward(X)
-activation1.forward(dense1.output)
+# we create this class because calculations get simpler if we have the combo below
+class ActivationSoftmaxLossCategoricalCrossEntropy:
 
-dense2.forward(activation1.output)
-activation2.forward(dense2.output)
+    def __init__(self):
+        self.activation = Softmax()
+        self.loss = CategoricalCrossEntropyLoss()
 
-print(activation2.output[:5])
+    def forward(self, inputs, y_true):
+        self.activation.forward(inputs)
+        self.output = self.activation.output
+        return self.loss.calculate(self.output, y_true)
 
-loss_function = CategoricalCrossEntropyLoss()
-loss = loss_function.calculate(activation2.output, y)
-print("Loss", loss)
+    def backward(self, dvalues, y_true):
+        samples = len(dvalues)
+
+        # changing one-hot encoded labels to discrete values
+        if len(y_true.shape) == 2:
+            y_true = np.argmax(y_true, axis=1)
+
+        self.dinputs = dvalues.copy()
+        self.dinputs[range(samples), y_true] -= 1
+        self.dinputs = self.dinputs / samples
+
+
+if __name__ == "__main__":
+    X, y = spiral_data(100, 3)
+
+    dense1 = LayerDense(2, 3)
+    activation1 = ReLU()
+
+    dense2 = LayerDense(3, 3)
+    loss_activation = ActivationSoftmaxLossCategoricalCrossEntropy()
+
+    dense1.forward(X)
+    activation1.forward(dense1.output)
+
+    dense2.forward(activation1.output)
+    loss = loss_activation.forward(dense2.output, y)
+
+    print(loss_activation.output[:5])
+    print(f"Loss is {loss}")
+
+    predictions = np.argmax(loss_activation.output, axis=1)
+    if len(y.shape) == 2:
+        y = np.argmax(y, axis=1)
+
+    accuracy = np.mean(predictions == y)
+    print(f"Accuracy is {accuracy}")
+
+    # backward pass
+    # here we use the output of final layer as dvalues
+    loss_activation.backward(loss_activation.output, y)
+    dense2.backward(loss_activation.dinputs)
+    activation1.backward(dense2.dinputs)
+    dense1.backward(activation1.dinputs)
