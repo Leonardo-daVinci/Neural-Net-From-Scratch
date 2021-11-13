@@ -1,30 +1,15 @@
+import nnfs
 import numpy as np
+from nnfs.datasets import spiral_data
 
-np.random.seed(0)
-
-# inputs are generally referred to as X
-X = [[1, 2, 3, 2.5],
-     [2.0, 5.0, -1.0, 2.0],
-     [-1.5, 2.7, 3.3, -0.8]]
-
-
-def spiral_data(points, classes):
-    X = np.zeros((points * classes, 2))
-    y = np.zeros(points * classes, dtype='uint8')
-    for class_number in range(classes):
-        ix = range(points * class_number, points * (class_number + 1))
-        r = np.linspace(0.0, 1, points)  # radius
-        t = np.linspace(class_number * 4, (class_number + 1) * 4, points) + np.random.randn(points) * 0.2
-        X[ix] = np.c_[r * np.sin(t * 2.5), r * np.cos(t * 2.5)]
-        y[ix] = class_number
-    return X, y
+nnfs.init()
 
 
 class LayerDense:
     def __init__(self, n_inputs, n_neurons):
         # weights are in the shape of features x number of neurons - this avoids taking transpose in forward pass
         # we get a gaussian distribution using randn but we want the range of weights to be -1 to 1, we multiply by 0.10
-        self.weights = 0.10 * np.random.randn(n_inputs, n_neurons)
+        self.weights = 0.01 * np.random.randn(n_inputs, n_neurons)
 
         # biases are in the shape of 1 x number of neurons
         self.biases = np.zeros((1, n_neurons))
@@ -36,8 +21,10 @@ class LayerDense:
 
     # backward pass
     def backward(self, dvalues):
+        # gradient on parameters
         self.dweights = np.dot(self.inputs.T, dvalues)
         self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
+        # gradient on values
         self.dinputs = np.dot(dvalues, self.weights.T)
 
 
@@ -49,7 +36,7 @@ class ReLU:
 
     # backward pass
     def backward(self, dvalues):
-        self.dinputs = self.inputs.copy()
+        self.dinputs = dvalues.copy()
         self.dinputs[self.inputs <= 0] = 0
 
 
@@ -73,8 +60,8 @@ class Softmax:
 class Loss:
     def calculate(self, output, y):
         sample_losses = self.forward(output, y)
-        batch_loss = np.mean(sample_losses)
-        return batch_loss
+        data_loss = np.mean(sample_losses)
+        return data_loss
 
 
 class CategoricalCrossEntropyLoss(Loss):
@@ -135,34 +122,52 @@ class ActivationSoftmaxLossCategoricalCrossEntropy:
         self.dinputs = self.dinputs / samples
 
 
-if __name__ == "__main__":
-    X, y = spiral_data(100, 3)
+class SGD:
 
-    dense1 = LayerDense(2, 3)
+    def __init__(self, learning_rate=1.0):
+        self.learning_rate = learning_rate
+
+    def update_params(self, layer):
+        layer.weights += - self.learning_rate * layer.dweights
+        layer.biases += - self.learning_rate * layer.dbiases
+
+
+if __name__ == "__main__":
+    X, y = spiral_data(samples=100, classes=3)
+
+    dense1 = LayerDense(2, 64)
     activation1 = ReLU()
 
-    dense2 = LayerDense(3, 3)
+    dense2 = LayerDense(64, 3)
     loss_activation = ActivationSoftmaxLossCategoricalCrossEntropy()
 
-    dense1.forward(X)
-    activation1.forward(dense1.output)
+    # creating optimizer object
+    optimizer = SGD()
 
-    dense2.forward(activation1.output)
-    loss = loss_activation.forward(dense2.output, y)
+    for epoch in range(10001):
 
-    print(loss_activation.output[:5])
-    print(f"Loss is {loss}")
+        dense1.forward(X)
+        activation1.forward(dense1.output)
 
-    predictions = np.argmax(loss_activation.output, axis=1)
-    if len(y.shape) == 2:
-        y = np.argmax(y, axis=1)
+        dense2.forward(activation1.output)
+        loss = loss_activation.forward(dense2.output, y)
 
-    accuracy = np.mean(predictions == y)
-    print(f"Accuracy is {accuracy}")
+        predictions = np.argmax(loss_activation.output, axis=1)
+        if len(y.shape) == 2:
+            y = np.argmax(y, axis=1)
 
-    # backward pass
-    # here we use the output of final layer as dvalues
-    loss_activation.backward(loss_activation.output, y)
-    dense2.backward(loss_activation.dinputs)
-    activation1.backward(dense2.dinputs)
-    dense1.backward(activation1.dinputs)
+        accuracy = np.mean(predictions == y)
+
+        if not epoch % 100:
+            print(f"Epoch is {epoch} Accuracy is {accuracy:.3f} and loss is {loss:.3f}")
+
+        # backward pass
+        # here we use the output of final layer as dvalues
+        loss_activation.backward(loss_activation.output, y)
+        dense2.backward(loss_activation.dinputs)
+        activation1.backward(dense2.dinputs)
+        dense1.backward(activation1.dinputs)
+
+        # update the parameters
+        optimizer.update_params(dense1)
+        optimizer.update_params(dense2)
