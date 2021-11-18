@@ -146,6 +146,8 @@ class SGD:
                 layer.weight_momentums = np.zeros_like(layer.weights)
                 layer.bias_momentums = np.zeros_like(layer.biases)
 
+            # update to parameters is learning rate * param gradients
+            # we use momentum which is a fraction of the update done to the parameter
             weight_updates = self.momentum * layer.weight_momentums - self.current_learning_rate * layer.dweights
             layer.weight_momentums = weight_updates
 
@@ -181,19 +183,20 @@ class AdaGrad:
             layer.weight_cache = np.zeros_like(layer.weights)
             layer.bias_cache = np.zeros_like(layer.biases)
 
+        # to keep the parameters from growing too fast, we do the following
+        # cache += param_gradient ** 2
+        # param_updates = learning rate * param_gradient / (sqrt(cache) + epsilon)
         layer.weight_cache += layer.dweights ** 2
         layer.bias_cache += layer.dbiases ** 2
 
         layer.weights += - self.current_learning_rate * layer.dweights / (np.sqrt(layer.weight_cache) + self.epsilon)
         layer.biases += - self.current_learning_rate * layer.dbiases / (np.sqrt(layer.bias_cache) + self.epsilon)
+        # this may make learning very slow hence it is seldom used
 
     def post_update_params(self):
         self.iterations += 1
 
 
-# Root Mean Square Propagation
-# Adds mechanism for momentum like SGD but also per-parameter adaptive learning rate
-# It has a moving average of cache which retains global direction of learning rate
 class RMSprop:
     def __init__(self, learning_rate=0.001, decay=0., epsilon=1e-7, rho=0.9):
         self.learning_rate = learning_rate
@@ -214,7 +217,9 @@ class RMSprop:
             layer.weight_cache = np.zeros_like(layer.weights)
             layer.bias_cache = np.zeros_like(layer.biases)
 
-        # Update cache with squared current gradients
+        # just like AdaGrad, we have a following ways to control parameters
+        # cache = rho * cache + (1- rho) * gradient ** 2
+        # updating the params is same as AdaGrad
         layer.weight_cache = self.rho * layer.weight_cache + (1 - self.rho) * layer.dweights ** 2
         layer.bias_cache = self.rho * layer.bias_cache + (1 - self.rho) * layer.dbiases ** 2
 
@@ -222,6 +227,57 @@ class RMSprop:
         # with square rooted cache
         layer.weights += - self.current_learning_rate * layer.dweights / (np.sqrt(layer.weight_cache) + self.epsilon)
         layer.biases += - self.current_learning_rate * layer.dbiases / (np.sqrt(layer.bias_cache) + self.epsilon)
+
+    def post_update_params(self):
+        self.iterations += 1
+
+
+# Adam incorporates RMSprop along with momentum in SGD
+class Adam:
+    def __init__(self, learning_rate=0.001, decay=0., epsilon=1e-7, momentum=0.9, rho=0.999):
+        self.learning_rate = learning_rate
+        self.current_learning_rate = learning_rate
+        self.decay = decay
+        self.iterations = 0
+        self.epsilon = epsilon
+        self.momentum = momentum
+        self.rho = rho
+
+    def pre_update_params(self):
+        if self.decay:
+            self.current_learning_rate = self.learning_rate * (1. / (1. + self.decay * self.iterations))
+
+    def update_params(self, layer):
+        # If layer does not contain cache arrays and momentum arrays
+        # create them filled with zeros
+        if not hasattr(layer, 'weight_cache'):
+            layer.weight_momentums = np.zeros_like(layer.weights)
+            layer.weight_cache = np.zeros_like(layer.weights)
+            layer.bias_momentums = np.zeros_like(layer.biases)
+            layer.bias_cache = np.zeros_like(layer.biases)
+
+        # Update momentum with current gradients
+        layer.weight_momentums = self.momentum * layer.weight_momentums + (1 - self.momentum) * layer.dweights
+        layer.bias_momentums = self.momentum * layer.bias_momentums + (1 - self.momentum) * layer.dbiases
+
+        # Get corrected momentum
+        weight_momentums_corrected = layer.weight_momentums / (1 - self.momentum ** (self.iterations + 1))
+        bias_momentums_corrected = layer.bias_momentums / (1 - self.momentum ** (self.iterations + 1))
+
+        # Update cache with squared current gradients
+        layer.weight_cache = self.rho * layer.weight_cache + (1 - self.rho) * layer.dweights ** 2
+        layer.bias_cache = self.rho * layer.bias_cache + (1 - self.rho) * layer.dbiases ** 2
+
+        # Get corrected cache
+        weight_cache_corrected = layer.weight_cache / (1 - self.rho ** (self.iterations + 1))
+        bias_cache_corrected = layer.bias_cache / (1 - self.rho ** (self.iterations + 1))
+
+        # Vanilla SGD parameter update + normalization
+        # with square rooted cache
+        layer.weights += - self.current_learning_rate * weight_momentums_corrected / (
+                    np.sqrt(weight_cache_corrected) + self.epsilon)
+        layer.biases += - self.current_learning_rate * bias_momentums_corrected / (
+                    np.sqrt(bias_cache_corrected) + self.epsilon)
 
     def post_update_params(self):
         self.iterations += 1
@@ -237,7 +293,7 @@ if __name__ == "__main__":
     loss_activation = ActivationSoftmaxLossCategoricalCrossEntropy()
 
     # using RMSprop optimizer
-    optimizer = RMSprop(learning_rate=0.02, decay=1e-5, rho=0.999)
+    optimizer = Adam(learning_rate=0.05, decay=5e-7)
 
     for epoch in range(10001):
 
