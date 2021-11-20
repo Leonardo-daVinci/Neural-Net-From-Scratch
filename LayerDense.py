@@ -6,13 +6,13 @@ nnfs.init()
 
 
 class LayerDense:
-    def __init__(self, n_inputs, n_neurons):
-        # weights are in the shape of features x number of neurons - this avoids taking transpose in forward pass
-        # we get a gaussian distribution using randn but we want the range of weights to be -1 to 1, we multiply by 0.10
+    def __init__(self, n_inputs, n_neurons, L1_weight=0., L2_weight=0., L1_bias=0., L2_bias=0.):
         self.weights = 0.01 * np.random.randn(n_inputs, n_neurons)
-
-        # biases are in the shape of 1 x number of neurons
         self.biases = np.zeros((1, n_neurons))
+        self.L1_weight = L1_weight
+        self.L2_weight = L2_weight
+        self.L1_bias = L1_bias
+        self.L2_bias = L2_bias
 
     # forward pass
     def forward(self, inputs):
@@ -24,6 +24,26 @@ class LayerDense:
         # gradient on parameters
         self.dweights = np.dot(self.inputs.T, dvalues)
         self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
+
+        # using L1 and L2 regularization
+        # derivative of L1 is just 1 if parameter is positive else -1
+        # derivative of L2 is 2 * parameter
+        if self.L1_weight > 0:
+            dL1 = np.ones_like(self.weights)
+            dL1[self.weights < 0] = -1
+            self.dweights += self.L1_weight * dL1
+
+        if self.L1_bias > 0:
+            dL1 = np.ones_like(self.biases)
+            dL1[self.biases < 0] = -1
+            self.dbiases += self.L1_bias * dL1
+
+        if self.L2_weight > 0:
+            self.dweights += 2 * self.L2_weight * self.weights
+
+        if self.L2_bias > 0:
+            self.dbiases += 2 * self.L2_bias * self.biases
+
         # gradient on values
         self.dinputs = np.dot(dvalues, self.weights.T)
 
@@ -284,9 +304,9 @@ class Adam:
 
 
 if __name__ == "__main__":
-    X, y = spiral_data(samples=100, classes=3)
+    X, y = spiral_data(samples=1000, classes=3)
 
-    dense1 = LayerDense(2, 64)
+    dense1 = LayerDense(2, 64, L2_weight=5e-4, L2_bias=5e-4)
     activation1 = ReLU()
 
     dense2 = LayerDense(64, 3)
@@ -322,3 +342,18 @@ if __name__ == "__main__":
         optimizer.update_params(dense1)
         optimizer.update_params(dense2)
         optimizer.post_update_params()
+
+    # validating the model
+    X_test, y_test = spiral_data(samples=100, classes=3)
+
+    dense1.forward(X_test)
+    activation1.forward(dense1.output)
+    dense2.forward(activation1.output)
+    loss = loss_activation.forward(dense2.output, y_test)
+
+    predictions = np.argmax(loss_activation.output, axis=1)
+    if len(y_test.shape) == 2:
+        y_test = np.argmax(y_test, axis=1)
+    accuracy = np.mean(predictions == y_test)
+
+    print(f"Validation accuracy is : {accuracy:.3f} and loss is : {loss:.3f}")
