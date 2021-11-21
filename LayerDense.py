@@ -48,6 +48,23 @@ class LayerDense:
         self.dinputs = np.dot(dvalues, self.weights.T)
 
 
+class LayerDropout:
+    # rate is how many we neurons we want to drop
+    # so 1-rate is number of neurons we want ot keep
+    def __init__(self, rate):
+        self.rate = 1 - rate
+
+    def forward(self, inputs):
+        self.inputs = inputs
+        # np.random.binomial is used to turn the neurons off
+        # we divide by self.rate to scale up the output of dropout layer
+        self.binary_mask = np.random.binomial(1, self.rate, size=inputs.shape) / self.rate
+        self.output = inputs * self.binary_mask
+
+    def backward(self, dvalues):
+        self.dinputs = dvalues * self.binary_mask
+
+
 class ReLU:
     # forward pass
     def forward(self, inputs):
@@ -306,21 +323,25 @@ class Adam:
 if __name__ == "__main__":
     X, y = spiral_data(samples=1000, classes=3)
 
-    dense1 = LayerDense(2, 64, L2_weight=5e-4, L2_bias=5e-4)
+    dense1 = LayerDense(2, 512, L2_weight=5e-4, L2_bias=5e-4)
     activation1 = ReLU()
 
-    dense2 = LayerDense(64, 3)
+    dropout1 = LayerDropout(0.1)
+
+    dense2 = LayerDense(512, 3)
     loss_activation = ActivationSoftmaxLossCategoricalCrossEntropy()
 
     # using RMSprop optimizer
-    optimizer = Adam(learning_rate=0.05, decay=5e-7)
+    optimizer = Adam(learning_rate=0.05, decay=5e-5)
 
     for epoch in range(10001):
 
         dense1.forward(X)
         activation1.forward(dense1.output)
 
-        dense2.forward(activation1.output)
+        dropout1.forward(activation1.output)
+
+        dense2.forward(dropout1.output)
         loss = loss_activation.forward(dense2.output, y)
 
         predictions = np.argmax(loss_activation.output, axis=1)
@@ -334,7 +355,8 @@ if __name__ == "__main__":
 
         loss_activation.backward(loss_activation.output, y)
         dense2.backward(loss_activation.dinputs)
-        activation1.backward(dense2.dinputs)
+        dropout1.backward(dense2.dinputs)
+        activation1.backward(dropout1.dinputs)
         dense1.backward(activation1.dinputs)
 
         # update the parameters
